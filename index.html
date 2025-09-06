@@ -1,272 +1,216 @@
-<!DOCTYPE html>
+<!doctype html>
+
 <html lang="ja">
 <head>
-<meta charset="utf-8" />
-<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no" />
-<title>確率投影チェス（A=現在 / B=揺らぐ未来）</title>
-<style>
-:root{
-  --bg:#0b0f14; --card:#121821; --muted:#90a4b8; --text:#e9eef6; --btn:#1b2533;
-  --sqL:#e9d8a6; --sqD:#1d4d4f; --sel:#ffd166; --accent:#6ca6ff;
-  --w:#ffd86b; --b:#6bd3ff;
-}
-*{box-sizing:border-box}
-html,body{margin:0;background:var(--bg);color:var(--text);font-family:ui-sans-serif,system-ui,-apple-system,Segoe UI,Roboto,Helvetica,Arial}
-.wrap{padding:14px;display:flex;flex-direction:column;gap:12px}
-.row{display:flex;gap:8px;justify-content:center;flex-wrap:wrap;align-items:center}
-button{background:var(--btn);color:var(--text);border:1px solid #26344a;border-radius:12px;padding:9px 12px}
-input[type=range]{width:180px}
-.boards{display:grid;gap:12px}
-@media(min-width:720px){.boards{grid-template-columns:1fr 1fr}}
-.card{background:var(--card);border:1px solid #1f2a3b;border-radius:14px;padding:10px}
-.board{display:grid;grid-template-columns:repeat(8,1fr);border:2px solid #29364a;border-radius:10px;overflow:hidden;max-width:92vw;margin:0 auto;touch-action:manipulation}
-.sq{width:11.5vw;height:11.5vw;max-width:66px;max-height:66px;display:flex;align-items:center;justify-content:center;font-size:28px;position:relative;user-select:none}
-.light{background:var(--sqL)} .dark{background:var(--sqD)}
-.sel{outline:3px solid var(--accent);outline-offset:-3px}
-.legal::after{content:"";position:absolute;inset:6px;border:3px dashed var(--sel);border-radius:6px}
-.p{filter:drop-shadow(0 1px 0 #0008) drop-shadow(0 2px 4px #0006)}
-.w{color:var(--w)} .b{color:var(--b)}
-.ghost{opacity:.75;text-shadow:0 0 8px #fff8}
-.badge{font-size:12px;color:var(--muted)}
-.note{font-size:12px;color:#b9c6d6}
-</style>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Probabilistic-Timespace-Chess – A/B面スケルトン</title>
+  <style>
+    :root { --bg:#0b0d10; --card:#131720; --text:#e7edf5; --muted:#9fb2c9; --accent:#6aa3ff; }
+    html,body{height:100%;}
+    body { margin:0; background:var(--bg); color:var(--text); font-family: ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, "ヒラギノ角ゴ ProN", "Hiragino Kaku Gothic ProN", "Noto Sans JP", "メイリオ", Meiryo, sans-serif; }
+    .container{max-width:1100px; margin:40px auto; padding:0 16px;}
+    .grid{display:grid; grid-template-columns: 1fr 1fr; gap:16px;}
+    .card{background:var(--card); border:1px solid #1f2633; border-radius:16px; padding:16px; box-shadow:0 6px 24px rgba(0,0,0,.25)}
+    .title{font-size:20px; font-weight:700; letter-spacing:.02em;}
+    .muted{color:var(--muted); font-size:12px}
+    .fen{font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, "Liberation Mono", monospace; background:#0f141c; border:1px solid #202a3a; border-radius:10px; padding:10px; overflow:auto;}
+    .row{display:flex; gap:8px; align-items:center;}
+    .row + .row{margin-top:8px}
+    input, select { background:#0f141c; border:1px solid #283248; color:var(--text); padding:10px 12px; border-radius:10px; outline:none;}
+    input:focus{border-color:var(--accent)}
+    button{ background:var(--accent); color:#08111f; border:none; border-radius:10px; padding:10px 14px; font-weight:700; cursor:pointer;}
+    button.secondary{ background:#232b3a; color:var(--text); }
+    .footer{margin-top:14px; display:flex; gap:8px; align-items:center; justify-content:space-between}
+    .hint{font-size:12px; color:var(--muted)}
+    @media (max-width: 900px){ .grid{grid-template-columns:1fr} }
+    .board{ display:grid; grid-template-columns: repeat(8, 1fr); gap:2px; margin-top:8px; }
+    .sq{ aspect-ratio: 1/1; display:flex; align-items:center; justify-content:center; border-radius:6px; }
+    .sq.light{ background:#d8dee9; color:#2e3440 }
+    .sq.dark{ background:#4c566a }
+  </style>
+  <!-- 公式のチェスルール実装（SAN→FEN 用） -->
+  <script src="https://cdn.jsdelivr.net/npm/chess.js@1.0.0/dist/chess.min.js"></script>
 </head>
 <body>
-<div class="wrap">
-  <h2>確率投影チェス（A=現在 / B=揺らぐ未来）</h2>
-  <div class="note">
-    Aで指す時に<b>Project</b>をONにすると、同座標に影（ゴースト）をBへ生成。<br>
-    Bで影を動かし<b>Collapse</b>をONにして影をタップすると、成功確率p%でAへ具現化（本体がその座標へ瞬間移動）。失敗すると影は消滅。<br>
-    勝敗はAのキングのみで判定（Kが取られたら即終了）。<br>
-    簡易ルール：キャスリング／アンパッサンなし、昇格は最終段でQに自動昇格。
+  <div class="container">
+    <h1 style="margin:0 0 18px 0">Probabilistic‑Timespace‑Chess <span class="muted">（A面=実体／B面=確率投影）</span></h1><div class="card" style="margin-bottom:16px">
+  <div class="row" style="flex-wrap:wrap">
+    <label>初期FEN: <input id="initFen" value="startpos" style="min-width:260px" /></label>
+    <label>バリアント:
+      <select id="variant">
+        <option value="probProjection">probProjection（確率投影・B面を導出）</option>
+        <option value="standard">standard（通常チェス・B面=実体）</option>
+      </select>
+    </label>
+    <label>Seed: <input id="seed" type="number" value="123456789" style="width:160px" /></label>
+    <button id="btnStart">ゲーム開始</button>
+    <button id="btnReset" class="secondary">リセット</button>
   </div>
-  <div class="row">
-    <button id="ai">Vs ランダムAI：ON</button>
-    <button id="project">Project：OFF</button>
-    <button id="shadowMove">影を操作：OFF</button>
-    <button id="collapse">Collapse（影→現在）：OFF</button>
-    <label class="badge">成功確率 <span id="pLab">60</span>% <input id="pRange" type="range" min="10" max="90" value="60"></label>
-    <button id="reset">リセット</button>
+  <div class="row" style="margin-top:10px">
+    <label>着手（SAN想定）: <input id="moveSan" placeholder="e4, Nf3 など" /></label>
+    <button id="btnMove">指す</button>
+    <span class="hint">※ chessエンジン連携がない場合は下の簡易盤／FENで動作確認だけできます</span>
   </div>
-  <div class="boards">
-    <div class="card">
-      <h3>A（現在）</h3>
-      <div id="A" class="board" aria-label="Board A"></div>
-    </div>
-    <div class="card">
-      <h3>B（揺らぐ未来）</h3>
-      <div class="badge">影（ゴースト）を動かして、Collapseで具現化に挑戦</div>
-      <div id="B" class="board" aria-label="Board B"></div>
-    </div>
-  </div>
-  <div class="card"><div id="status">White to move</div></div>
 </div>
 
-<script>
-/* ========== 盤・駒ユーティリティ ========== */
-const GL={wK:'♔',wQ:'♕',wR:'♖',wB:'♗',wN:'♘',wP:'♙',bK:'♚',bQ:'♛',bR:'♜',bB:'♝',bN:'♞',bP:'♟'};
-let NEXT_ID=1;
-const empty8=()=>Array.from({length:8},()=>Array(8).fill(null));
-const in8=(r,c)=>r>=0&&r<8&&c>=0&&c<8;
-const clone=b=>b.map(r=>r.slice());
-function mk(color,type,id){ return {color,type,id:id||NEXT_ID++}; }
-function glyph(p){ return GL[p.color+p.type]; }
+<div class="grid">
+  <div class="card">
+    <div class="title">A面（実体）</div>
+    <div class="muted">trueState.fen を表示（本番では盤面レンダラに渡す）</div>
+    <pre id="fenA" class="fen">startpos</pre>
+    <div id="boardA" class="board" aria-label="A board"></div>
+  </div>
+  <div class="card">
+    <div class="title">B面（確率投影）</div>
+    <div class="muted">bState.fen を表示（投影ロジックで導出）</div>
+    <pre id="fenB" class="fen">startpos</pre>
+    <div id="boardB" class="board" aria-label="B board"></div>
+  </div>
+</div>
 
-/* ========== 初期配置 ========== */
-function start(){
-  const A=empty8(), B=empty8();
-  const back=['R','N','B','Q','K','B','N','R'];
-  for(let c=0;c<8;c++){ A[6][c]=mk('w','P'); A[1][c]=mk('b','P'); }
-  for(let c=0;c<8;c++){ A[7][c]=mk('w',back[c]); A[0][c]=mk('b',back[c]); }
-  return {A,B};
-}
+<div class="footer">
+  <div class="hint">実装方針：A面=唯一の真実／B面=毎手後に projectToB(trueState, rules, seed) で再計算</div>
+  <div class="muted">v0.1 demo</div>
+</div>
 
-/* ========== 指し手生成（簡易チェス） ========== */
-function rays(board,r,c,dirs,side){
-  const out=[]; for(const[dr,dc] of dirs){ let nr=r+dr,nc=c+dc;
-    while(in8(nr,nc)){ const t=board[nr][nc];
-      if(!t) out.push([nr,nc]); else { if(t.color!==side) out.push([nr,nc]); break; }
-      nr+=dr; nc+=dc;
+  </div>  <script type="module">
+    // ====== 型っぽい定義（JSDocで補助）
+    /** @typedef {{ fen: string, version: number, ply: number }} TrueState */
+    /** @typedef {{ fen: string }} BState */
+    /** @typedef {{ variant: 'probProjection'|'standard' }} Rules */
+    /** @typedef {{ trueState: TrueState, bState: BState, rules: Rules, seed: number }} GameState */
+
+    // ====== 乱数（決定論シード）
+    function mulberry32(a){
+      return function(){
+        let t = (a += 0x6D2B79F5);
+        t = Math.imul(t ^ (t >>> 15), t | 1);
+        t ^= t + Math.imul(t ^ (t >>> 7), t | 61);
+        return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+      };
     }
-  } return out;
-}
-function steps(board,r,c,ds,side){
-  const out=[]; for(const[dr,dc] of ds){ const nr=r+dr,nc=c+dc;
-    if(!in8(nr,nc)) continue; const t=board[nr][nc]; if(!t||t.color!==side) out.push([nr,nc]);
-  } return out;
-}
-function pawn(board,r,c,side){
-  const out=[], d = side==='w' ? -1 : 1, f=r+d;
-  if(in8(f,c) && !board[f][c]) out.push([f,c]);
-  for(const dc of[-1,1]){ const nr=r+d, nc=c+dc; if(!in8(nr,nc)) continue;
-    const t=board[nr][nc]; if(t && t.color!==side) out.push([nr,nc]);
-  }
-  return out;
-}
-function legal(board,r,c){
-  const p=board[r][c]; if(!p) return [];
-  switch(p.type){
-    case 'P': return pawn(board,r,c,p.color);
-    case 'N': return steps(board,r,c,[[-2,-1],[-2,1],[-1,-2],[-1,2],[1,-2],[1,2],[2,-1],[2,1]],p.color);
-    case 'B': return rays(board,r,c,[[-1,-1],[-1,1],[1,-1],[1,1]],p.color);
-    case 'R': return rays(board,r,c,[[-1,0],[1,0],[0,-1],[0,1]],p.color);
-    case 'Q': return rays(board,r,c,[[-1,-1],[-1,1],[1,-1],[1,1],[-1,0],[1,0],[0,-1],[0,1]],p.color);
-    case 'K': return steps(board,r,c,[[-1,-1],[-1,0],[-1,1],[0,-1],[0,1],[1,-1],[1,0],[1,1]],p.color);
-    default: return [];
-  }
-}
-function promoteIfNeeded(p,r){
-  if(p.type!=='P') return p;
-  if(p.color==='w' && r===0) return mk('w','Q',p.id);
-  if(p.color==='b' && r===7) return mk('b','Q',p.id);
-  return p;
-}
 
-/* ========== 状態とUI ========== */
-const Ael=document.getElementById('A'), Bel=document.getElementById('B'), st=document.getElementById('status');
-const aiBtn=document.getElementById('ai'), projBtn=document.getElementById('project'), shBtn=document.getElementById('shadowMove'), colBtn=document.getElementById('collapse');
-const pRange=document.getElementById('pRange'), pLab=document.getElementById('pLab'); pRange.oninput=()=>pLab.textContent=pRange.value;
-
-let G=start(), turn='w', winner=null, ai=true, project=false, shadowMode=false, collapseMode=false;
-let pick=null, moves=[], pickBoard='A';
-
-aiBtn.onclick=()=>{ ai=!ai; aiBtn.textContent='Vs ランダムAI：'+(ai?'ON':'OFF'); }
-projBtn.onclick=()=>{ project=!project; projBtn.textContent='Project：'+(project?'ON':'OFF'); }
-shBtn.onclick=()=>{ shadowMode=!shadowMode; collapseMode=false; shBtn.textContent='影を操作：'+(shadowMode?'ON':'OFF'); colBtn.textContent='Collapse（影→現在）：OFF'; }
-colBtn.onclick=()=>{ collapseMode=!collapseMode; shadowMode=false; colBtn.textContent='Collapse（影→現在）：'+(collapseMode?'ON':'OFF'); shBtn.textContent='影を操作：OFF'; }
-document.getElementById('reset').onclick=()=>{ G=start(); turn='w'; winner=null; pick=null; moves=[]; draw(); }
-
-function winCheck(){
-  let wk=false,bk=false;
-  for(let r=0;r<8;r++)for(let c=0;c<8;c++){
-    const p=G.A[r][c];
-    if(p?.type==='K'){ if(p.color==='w') wk=true; else bk=true; }
-  }
-  if(!wk) return 'Black';
-  if(!bk) return 'White';
-  return null;
-}
-
-function draw(){
-  st.textContent = winner ? winner+' wins!' : (turn==='w'?'White':'Black')+' to move';
-  drawBoard(Ael,G.A,true,'A'); drawBoard(Bel,G.B,true,'B');
-}
-function drawBoard(root,board,interactive,which){
-  root.innerHTML='';
-  for(let r=0;r<8;r++)for(let c=0;c<8;c++){
-    const b=document.createElement('button'); b.className='sq '+(((r+c)%2)?'dark':'light');
-    const p=board[r][c];
-    if(p){
-      const s=document.createElement('span'); s.textContent=glyph(p);
-      s.className='p '+(p.color==='w'?'w':'b')+(which==='B'?' ghost':'');
-      b.appendChild(s);
+    // ====== ゲームコア（ダミー版）
+    // 実運用では chess.js 等で SAN→FEN を更新してください
+    function applySanToFen(currentFen, san){
+      // chess.js を使って、実際にその手を指した後の FEN を返す
+      const game = new Chess();
+      if (currentFen && currentFen !== 'startpos') {
+        try { game.load(currentFen); } catch(e){ alert('FENの読込に失敗: '+e.message); return currentFen; }
+      }
+      const move = game.move(san, { sloppy: true }); // sloppy:true で e.p. などの表記も許容
+      if (!move){
+        alert('不正な着手です: '+ san);
+        return currentFen; // 無効手なら状態を変えない
+      }
+      return game.fen();
     }
-    if(pick && pickBoard===which && pick.r===r && pick.c===c) b.classList.add('sel');
-    if(pick && pickBoard===which && moves.some(([rr,cc])=>rr===r&&cc===c)) b.classList.add('legal');
-    b.onclick=()=>tap(which,r,c);
-    root.appendChild(b);
-  }
-}
 
-function findPieceById(board,id){ for(let r=0;r<8;r++)for(let c=0;c<8;c++){ const p=board[r][c]; if(p?.id===id) return [r,c]; } return null; }
-
-function tap(which,r,c){
-  if(winner) return;
-
-  // Collapse：影→現在（A）へ具現化
-  if(which==='B' && collapseMode){
-    const g=G.B[r][c]; if(!g) return;
-    const id=g.id, pos=findPieceById(G.A,id);
-    if(!pos){ G.B[r][c]=null; draw(); return; } // 本体が既に失われていれば影を消す
-    const success = Math.random()*100 < parseInt(pRange.value,10);
-    if(success){
-      const tgt=G.A[r][c];
-      if(tgt && tgt.color===g.color){ st.textContent='同陣で塞がれているため具現化不可'; draw(); return; }
-      const [ar,ac]=pos; const cap=tgt;
-      G.A[r][c]=promoteIfNeeded(G.A[ar][ac], r);
-      G.A[ar][ac]=null; G.B[r][c]=null;
-      if(cap?.type==='K'){ winner = (g.color==='w'?'White':'Black'); draw(); return; }
-      endTurn(); return;
-    }else{
-      G.B[r][c]=null; st.textContent='具現化失敗（影は消滅）'; draw(); return;
+    function makeProjectedFen(trueFen, rng){
+      // trueFen の駒の一部を「不確定化」して B面用の文字列を作る簡単な例
+      // （本番ではあなたの投影規則に差し替えてください）
+      if (!trueFen || trueFen === 'startpos') {
+        // chess.js の開始局面 FEN を使う
+        const game = new Chess();
+        trueFen = game.fen();
+      }
+      const parts = trueFen.split(' ');
+      const board = parts[0];
+      const rows = board.split('/');
+      const projectedRows = rows.map(row => {
+        let out = '';
+        for (const ch of row){
+          if (/[1-8]/.test(ch)) { out += ch; continue; }
+          // 25% の確率でそのマスを不確定（?）表示にするデモ
+          out += (rng() < 0.25) ? '?' : ch;
+        }
+        return out;
+      });
+      parts[0] = projectedRows.join('/');
+      return parts.join(' ');
     }
-  }
 
-  const board = which==='A'? G.A : G.B;
+    /** @param {TrueState} trueState @param {Rules} rules @param {number} seed */
+    function projectToB(trueState, rules, seed){
+      if (rules.variant !== 'probProjection') return { fen: trueState.fen };
+      const rng = mulberry32(seed + trueState.ply);
+      return { fen: makeProjectedFen(trueState.fen, rng) };
+    }
 
-  // 選択処理
-  if(!pick){
-    const p=board[r][c];
-    if(p){
-      // Aは本体、Bは影を動かすモードの時のみ選択可
-      if( (which==='A' && p.color===turn && !shadowMode) ||
-          (which==='B' && p.color===turn && shadowMode) ){
-        pick={r,c}; pickBoard=which; moves=legal(board,r,c); draw();
+    function applyMove(trueState, san){
+      const nextFen = applySanToFen(trueState.fen, san);
+      return { fen: nextFen, version: trueState.version + 1, ply: trueState.ply + 1 };
+    }
+
+    // ====== 状態（Reducer風に実装）
+    /** @type {GameState} */
+    let state = { trueState: { fen:'startpos', version:0, ply:0 }, bState: { fen:'startpos' }, rules:{ variant:'probProjection' }, seed: 123456789 };
+
+    function startGame(fen, rules, seed){
+      state.trueState = { fen, version:0, ply:0 };
+      state.rules = rules;
+      state.seed = seed ?? Math.floor(Math.random()*1e9);
+      state.bState = projectToB(state.trueState, state.rules, state.seed);
+      render();
+    }
+
+    function onMove(san){
+      state.trueState = applyMove(state.trueState, san);
+      state.bState = projectToB(state.trueState, state.rules, state.seed);
+      render();
+    }
+
+    // ====== UI バインド
+    const elFenA = document.getElementById('fenA');
+    const elFenB = document.getElementById('fenB');
+    const elBoardA = document.getElementById('boardA');
+    const elBoardB = document.getElementById('boardB');
+
+    function render(){
+      elFenA.textContent = state.trueState.fen;
+      elFenB.textContent = state.bState.fen;
+      drawBoard(elBoardA, state.trueState);
+      drawBoard(elBoardB, state.bState);
+    }
+
+    // 簡易盤レンダラ（デモ用：実盤ロジックには未対応）
+    function drawBoard(container, anyState){
+      container.innerHTML = '';
+      // 8x8 のダミーマス（FENではなく、可視的な変化確認用）
+      for (let r=0;r<8;r++){
+        for (let c=0;c<8;c++){
+          const d = document.createElement('div');
+          d.className = 'sq ' + ((r+c)%2 ? 'dark' : 'light');
+          // 盤面の変化を視覚化（雑に：文字数の一部）
+          const hash = (anyState.fen.length + r*8 + c) % 10;
+          d.textContent = hash === 0 ? '♟' : '';
+          container.appendChild(d);
+        }
       }
     }
-    return;
-  }
 
-  if(pickBoard!==which){ pick=null; moves=[]; draw(); return; }
+    // イベント
+    document.getElementById('btnStart').addEventListener('click', () => {
+      const fen = /** @type {HTMLInputElement} */(document.getElementById('initFen')).value || 'startpos';
+      const variant = /** @type {HTMLSelectElement} */(document.getElementById('variant')).value;
+      const seed = parseInt(/** @type {HTMLInputElement} */(document.getElementById('seed')).value || '0', 10);
+      startGame(fen, { variant }, seed);
+    });
 
-  const ok = moves.some(([rr,cc])=>rr===r&&cc===c);
-  if(!ok){
-    const p=board[r][c];
-    if(p && p.color===turn){ pick={r,c}; moves=legal(board,r,c); draw(); }
-    else { pick=null; moves=[]; draw(); }
-    return;
-  }
+    document.getElementById('btnReset').addEventListener('click', () => {
+      startGame('startpos', { variant:'probProjection' }, 123456789);
+      /** @type {HTMLInputElement} */(document.getElementById('moveSan')).value = '';
+    });
 
-  // 実行
-  const [sr,sc]=[pick.r,pick.c];
-  const mv=board[sr][sc]; const cap=board[r][c];
-  board[r][c]=promoteIfNeeded(mv,r); board[sr][sc]=null;
+    document.getElementById('btnMove').addEventListener('click', () => {
+      const san = /** @type {HTMLInputElement} */(document.getElementById('moveSan')).value.trim();
+      if (!san) return;
+      onMove(san);
+      /** @type {HTMLInputElement} */(document.getElementById('moveSan')).value = '';
+    });
 
-  if(which==='A'){
-    if(project){ // 影を生成（同IDでBに複製）
-      if(!G.B[r][c]) G.B[r][c] = {...board[r][c], ghost:true};
-    }
-    if(cap?.type==='K'){ winner = (turn==='w'?'White':'Black'); draw(); return; }
-    G.A=board; endTurn();
-  }else{
-    // 影を動かしただけ
-    G.B=board; pick=null; moves=[]; draw();
-  }
-}
-
-function endTurn(){
-  pick=null; moves=[];
-  turn = (turn==='w'?'b':'w');
-  winner = winCheck();
-  draw();
-  maybeAI();
-}
-
-/* ========== 簡易AI（A盤のみ） ========== */
-function allMovesA(color){
-  const out=[];
-  for(let r=0;r<8;r++)for(let c=0;c<8;c++){
-    const p=G.A[r][c]; if(p&&p.color===color){
-      for(const[nr,nc] of legal(G.A,r,c)) out.push([r,c,nr,nc]);
-    }
-  }
-  return out;
-}
-function maybeAI(){
-  if(!ai || winner || turn!=='b') return;
-  setTimeout(()=>{
-    const ms=allMovesA('b');
-    if(!ms.length){ winner='White'; draw(); return; }
-    const m=ms[Math.random()*ms.length|0];
-    const [r,c,nr,nc]=m; const cap=G.A[nr][nc];
-    G.A[nr][nc]=promoteIfNeeded(G.A[r][c], nr); G.A[r][c]=null;
-    if(cap?.type==='K'){ winner='Black'; draw(); return; }
-    turn='w'; draw();
-  },220);
-}
-
-/* 初期描画 */
-draw();
-</script>
-</body>
+    // 初期化
+    startGame('startpos', { variant:'probProjection' }, 123456789);
+  </script></body>
 </html>
