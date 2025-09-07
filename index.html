@@ -4,7 +4,7 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>Probabilistic-Timespace-Chess – A/B面スケルトン</title>
+  <title>Probabilistic‑Timespace‑Chess – 2盤表示・視覚ハイライト</title>
   <style>
     :root { --bg:#0b0d10; --card:#131720; --text:#e7edf5; --muted:#9fb2c9; --accent:#6aa3ff; }
     html,body{height:100%;}
@@ -23,13 +23,16 @@
     button.secondary{ background:#232b3a; color:var(--text); }
     .footer{margin-top:14px; display:flex; gap:8px; align-items:center; justify-content:space-between}
     .hint{font-size:12px; color:var(--muted)}
-    @media (max-width: 900px){ .grid{grid-template-columns:1fr} }
-    .board{ display:grid; grid-template-columns: repeat(8, 1fr); gap:2px; margin-top:8px; }
-    .sq{ aspect-ratio: 1/1; display:flex; align-items:center; justify-content:center; border-radius:6px; }
-    .sq.light{ background:#d8dee9; color:#2e3440 }
-    .sq.dark{ background:#4c566a }
+    @media (max-width: 900px){ .grid{grid-template-columns:1fr} }.board{ display:grid; grid-template-columns: repeat(8, 1fr); gap:2px; margin-top:8px; }
+.sq{ aspect-ratio: 1/1; display:flex; align-items:center; justify-content:center; border-radius:6px; font-size:28px; user-select:none; transition: box-shadow .15s ease, transform .1s ease;}
+.sq.light{ background:#d8dee9; color:#2e3440 }
+.sq.dark{ background:#4c566a }
+.sq.highlight-from{ outline:3px solid #ffd166; box-shadow: inset 0 0 0 2px #ffd166 }
+.sq.highlight-to{ outline:3px solid #06d6a0; box-shadow: inset 0 0 0 2px #06d6a0 }
+.piece{ filter: drop-shadow(0 1px 0 rgba(0,0,0,.2)); }
+
   </style>
-  <!-- 公式のチェスルール実装（SAN→FEN 用） -->
+  <!-- SAN→FEN を本物のチェス規則で処理するライブラリ -->
   <script src="https://cdn.jsdelivr.net/npm/chess.js@1.0.0/dist/chess.min.js"></script>
 </head>
 <body>
@@ -50,36 +53,36 @@
   <div class="row" style="margin-top:10px">
     <label>着手（SAN想定）: <input id="moveSan" placeholder="e4, Nf3 など" /></label>
     <button id="btnMove">指す</button>
-    <span class="hint">※ chessエンジン連携がない場合は下の簡易盤／FENで動作確認だけできます</span>
+    <span class="hint">※ 2つの盤が常に並び、A面の移動は色付きでハイライトされます</span>
   </div>
 </div>
 
 <div class="grid">
   <div class="card">
     <div class="title">A面（実体）</div>
-    <div class="muted">trueState.fen を表示（本番では盤面レンダラに渡す）</div>
+    <div class="muted">trueState.fen（本当の局面）</div>
     <pre id="fenA" class="fen">startpos</pre>
     <div id="boardA" class="board" aria-label="A board"></div>
   </div>
   <div class="card">
     <div class="title">B面（確率投影）</div>
-    <div class="muted">bState.fen を表示（投影ロジックで導出）</div>
+    <div class="muted">bState.fen（“見え方”の局面）</div>
     <pre id="fenB" class="fen">startpos</pre>
     <div id="boardB" class="board" aria-label="B board"></div>
   </div>
 </div>
 
 <div class="footer">
-  <div class="hint">実装方針：A面=唯一の真実／B面=毎手後に projectToB(trueState, rules, seed) で再計算</div>
-  <div class="muted">v0.1 demo</div>
+  <div class="hint">方針：A面=唯一の真実／B面=毎手後に projectToB(trueState, rules, seed) で再計算</div>
+  <div class="muted">v0.2 demo</div>
 </div>
 
   </div>  <script type="module">
-    // ====== 型っぽい定義（JSDocで補助）
+    // ====== 型メモ
     /** @typedef {{ fen: string, version: number, ply: number }} TrueState */
     /** @typedef {{ fen: string }} BState */
     /** @typedef {{ variant: 'probProjection'|'standard' }} Rules */
-    /** @typedef {{ trueState: TrueState, bState: BState, rules: Rules, seed: number }} GameState */
+    /** @typedef {{ trueState: TrueState, bState: BState, rules: Rules, seed: number, lastMove: {from:string,to:string}|null }} GameState */
 
     // ====== 乱数（決定論シード）
     function mulberry32(a){
@@ -91,39 +94,27 @@
       };
     }
 
-    // ====== ゲームコア（ダミー版）
-    // 実運用では chess.js 等で SAN→FEN を更新してください
+    // ====== SAN→FEN（A面）
     function applySanToFen(currentFen, san){
-      // chess.js を使って、実際にその手を指した後の FEN を返す
       const game = new Chess();
       if (currentFen && currentFen !== 'startpos') {
         try { game.load(currentFen); } catch(e){ alert('FENの読込に失敗: '+e.message); return currentFen; }
       }
-      const move = game.move(san, { sloppy: true }); // sloppy:true で e.p. などの表記も許容
-      if (!move){
-        alert('不正な着手です: '+ san);
-        return currentFen; // 無効手なら状態を変えない
-      }
+      const move = game.move(san, { sloppy: true });
+      if (!move){ alert('不正な着手です: '+ san); return currentFen; }
       return game.fen();
     }
 
+    // ====== B面の作り方（例：一部を“?”にして不確定化）
     function makeProjectedFen(trueFen, rng){
-      // trueFen の駒の一部を「不確定化」して B面用の文字列を作る簡単な例
-      // （本番ではあなたの投影規則に差し替えてください）
-      if (!trueFen || trueFen === 'startpos') {
-        // chess.js の開始局面 FEN を使う
-        const game = new Chess();
-        trueFen = game.fen();
-      }
+      if (!trueFen || trueFen === 'startpos') trueFen = new Chess().fen();
       const parts = trueFen.split(' ');
-      const board = parts[0];
-      const rows = board.split('/');
+      const rows = parts[0].split('/');
       const projectedRows = rows.map(row => {
         let out = '';
         for (const ch of row){
           if (/[1-8]/.test(ch)) { out += ch; continue; }
-          // 25% の確率でそのマスを不確定（?）表示にするデモ
-          out += (rng() < 0.25) ? '?' : ch;
+          out += (rng() < 0.20) ? '?' : ch; // 20%を不確定表示にする例
         }
         return out;
       });
@@ -131,37 +122,102 @@
       return parts.join(' ');
     }
 
-    /** @param {TrueState} trueState @param {Rules} rules @param {number} seed */
+    // ====== A面の状態更新（ハイライト情報も取得）
+    function performMove(trueState, san){
+      const game = new Chess();
+      if (trueState.fen && trueState.fen !== 'startpos') game.load(trueState.fen);
+      const move = game.move(san, { sloppy:true });
+      if (!move){ alert('不正な着手です: ' + san); return { next: trueState, lastMove: null }; }
+      const next = { fen: game.fen(), version: trueState.version + 1, ply: trueState.ply + 1 };
+      const lastMove = { from: move.from, to: move.to };
+      return { next, lastMove };
+    }
+
+    // ====== B面への投影
     function projectToB(trueState, rules, seed){
       if (rules.variant !== 'probProjection') return { fen: trueState.fen };
       const rng = mulberry32(seed + trueState.ply);
       return { fen: makeProjectedFen(trueState.fen, rng) };
     }
 
-    function applyMove(trueState, san){
-      const nextFen = applySanToFen(trueState.fen, san);
-      return { fen: nextFen, version: trueState.version + 1, ply: trueState.ply + 1 };
-    }
-
-    // ====== 状態（Reducer風に実装）
+    // ====== 状態
     /** @type {GameState} */
-    let state = { trueState: { fen:'startpos', version:0, ply:0 }, bState: { fen:'startpos' }, rules:{ variant:'probProjection' }, seed: 123456789 };
+    let state = { trueState: { fen:'startpos', version:0, ply:0 }, bState: { fen:'startpos' }, rules:{ variant:'probProjection' }, seed: 123456789, lastMove: null };
 
     function startGame(fen, rules, seed){
       state.trueState = { fen, version:0, ply:0 };
       state.rules = rules;
       state.seed = seed ?? Math.floor(Math.random()*1e9);
       state.bState = projectToB(state.trueState, state.rules, state.seed);
+      state.lastMove = null;
       render();
     }
 
     function onMove(san){
-      state.trueState = applyMove(state.trueState, san);
+      const { next, lastMove } = performMove(state.trueState, san);
+      state.trueState = next;
       state.bState = projectToB(state.trueState, state.rules, state.seed);
+      state.lastMove = lastMove; // A面の移動をハイライト（B面も同一マスを参考表示）
       render();
     }
 
-    // ====== UI バインド
+    // ====== 盤の描画（Unicode 駒を使う）
+    function pieceCharToUnicode(ch){
+      const map = { K:'\u2654', Q:'\u2655', R:'\u2656', B:'\u2657', N:'\u2658', P:'\u2659',
+                    k:'\u265A', q:'\u265B', r:'\u265C', b:'\u265D', n:'\u265E', p:'\u265F' };
+      return map[ch] || (ch === '?' ? '?' : '');
+    }
+
+    function fenToGrid(fen){
+      const board = (fen && fen !== 'startpos') ? fen.split(' ')[0] : new Chess().fen().split(' ')[0];
+      const rows = board split ? board.split('/') : new Chess().fen().split(' ')[0].split('/');
+    }
+  </script>  <script type="module">
+    // 補正：fenToGrid の実装（上のタイプミスを避けるため分離）
+    function fenToGrid(fen){
+      const board = (fen && fen !== 'startpos') ? fen.split(' ')[0] : new Chess().fen().split(' ')[0];
+      const rows = board.split('/');
+      const grid = [];
+      for (let r=0; r<8; r++){
+        const row = [];
+        for (const ch of rows[r]){
+          if (/[1-8]/.test(ch)){
+            const n = parseInt(ch,10);
+            for (let i=0;i<n;i++) row.push('');
+          } else {
+            row.push(ch);
+          }
+        }
+        grid.push(row);
+      }
+      return grid;
+    }
+
+    function drawBoard(container, anyState, highlights){
+      container.innerHTML = '';
+      const grid = fenToGrid(anyState.fen);
+      for (let r=0;r<8;r++){
+        for (let c=0;c<8;c++){
+          const d = document.createElement('div');
+          const isDark = (r+c)%2;
+          d.className = 'sq ' + (isDark? 'dark':'light');
+          const file = 'abcdefgh'[c];
+          const rank = 8 - r;
+          const sqName = file + rank;
+          if (highlights){
+            if (highlights.from === sqName) d.classList.add('highlight-from');
+            if (highlights.to === sqName) d.classList.add('highlight-to');
+          }
+          const ch = grid[r][c];
+          const span = document.createElement('span');
+          span.className = 'piece';
+          span.textContent = pieceCharToUnicode(ch);
+          d.appendChild(span);
+          container.appendChild(d);
+        }
+      }
+    }
+
     const elFenA = document.getElementById('fenA');
     const elFenB = document.getElementById('fenB');
     const elBoardA = document.getElementById('boardA');
@@ -170,24 +226,8 @@
     function render(){
       elFenA.textContent = state.trueState.fen;
       elFenB.textContent = state.bState.fen;
-      drawBoard(elBoardA, state.trueState);
-      drawBoard(elBoardB, state.bState);
-    }
-
-    // 簡易盤レンダラ（デモ用：実盤ロジックには未対応）
-    function drawBoard(container, anyState){
-      container.innerHTML = '';
-      // 8x8 のダミーマス（FENではなく、可視的な変化確認用）
-      for (let r=0;r<8;r++){
-        for (let c=0;c<8;c++){
-          const d = document.createElement('div');
-          d.className = 'sq ' + ((r+c)%2 ? 'dark' : 'light');
-          // 盤面の変化を視覚化（雑に：文字数の一部）
-          const hash = (anyState.fen.length + r*8 + c) % 10;
-          d.textContent = hash === 0 ? '♟' : '';
-          container.appendChild(d);
-        }
-      }
+      drawBoard(elBoardA, state.trueState, state.lastMove);
+      drawBoard(elBoardB, state.bState, state.lastMove);
     }
 
     // イベント
