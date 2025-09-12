@@ -17,6 +17,7 @@
     .card{ background:#131720; border-radius:12px; padding:12px; }
     .title{ font-weight:bold; margin-bottom:8px; }.board{ display:grid; grid-template-columns:repeat(8,1fr); gap:2px; }
 .square{ aspect-ratio:1/1; display:flex; align-items:center; justify-content:center; font-size:28px; border-radius:4px; }
+.square.clickable{ cursor:pointer; }
 .light{ background:#d8dee9; color:#2e3440; }
 .dark{ background:#4c566a; }
 .highlight-from{ outline:3px solid #ffd166; }
@@ -47,7 +48,7 @@
   </div>  <script>
     const pieces = { p:'♟', r:'♜', n:'♞', b:'♝', q:'♛', k:'♚', P:'♙', R:'♖', N:'♘', B:'♗', Q:'♕', K:'♔' };
     let game = new Chess();
-    let lastMove = null;
+    let lastMove = null; let pendingFrom = null;
     let seed = 12345;
 
     function mulberry32(a){
@@ -59,30 +60,50 @@
       }
     }
 
-    function renderBoard(container, fen, probabilistic=false){
+    function renderBoard(container, fen, probabilistic=false, enableClicks=false){
       container.innerHTML = '';
       const rng = mulberry32(seed + game.history().length);
       const rows = fen.split(' ')[0].split('/');
       rows.forEach((row, r)=>{
         let expanded = '';
-        for(const ch of row){
-          expanded += /[1-8]/.test(ch)? ' '.repeat(+ch) : ch;
-        }
+        for(const ch of row){ expanded += /[1-8]/.test(ch)? ' '.repeat(+ch) : ch; }
         for(let c=0;c<8;c++){
           const sq = document.createElement('div');
-          sq.className = 'square ' + ((r+c)%2?'dark':'light');
+          sq.className = 'square ' + ((r+c)%2?'dark':'light') + (enableClicks? ' clickable' : '');
           const file = 'abcdefgh'[c];
           const rank = 8 - r;
           const name = file+rank;
+          // ハイライト（直前手 & 選択中）
           if(lastMove){
             if(lastMove.from===name) sq.classList.add('highlight-from');
             if(lastMove.to===name) sq.classList.add('highlight-to');
           }
+          if (enableClicks && pendingFrom===name){ sq.classList.add('highlight-from'); }
+          // 駒文字
           let ch = expanded[c];
           if(probabilistic && /[prnbqkPRNBQK]/.test(ch)){
             if(rng()<0.2) ch = '?';
           }
           sq.textContent = pieces[ch] || (ch==='?'?'?':'');
+          // クリック移動（A面のみ）
+          if (enableClicks){
+            sq.addEventListener('click', ()=>{
+              if(!pendingFrom){
+                pendingFrom = name; render(); return;
+              }
+              const from = pendingFrom, to = name;
+              const mv = game.move({ from, to, promotion:'q' });
+              if(mv){ lastMove = {from:mv.from,to:mv.to}; }
+              pendingFrom = null; render();
+            });
+            sq.addEventListener('touchend', ()=>{
+              if(!pendingFrom){ pendingFrom = name; render(); return; }
+              const from = pendingFrom, to = name;
+              const mv = game.move({ from, to, promotion:'q' });
+              if(mv){ lastMove = {from:mv.from,to:mv.to}; }
+              pendingFrom = null; render();
+            }, {passive:true});
+          }
           container.appendChild(sq);
         }
       });
@@ -90,7 +111,7 @@
 
     function render(){
       const fen = game.fen();
-      renderBoard(document.getElementById('boardA'), fen, false);
+      renderBoard(document.getElementById('boardA'), fen, false, true);
       renderBoard(document.getElementById('boardB'), fen, true);
     }
 
