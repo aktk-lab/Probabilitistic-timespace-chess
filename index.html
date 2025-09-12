@@ -1,90 +1,42 @@
-<!--
-このキャンバスは “複数ファイル” 前提のスターター一式です。
-各セクションをそのまま別ファイルとして保存してください。
-
-├─ index.html
-├─ styles.css
-└─ src/
-   ├─ core/
-   │   ├─ chessEngine.js
-   │   ├─ rng.js
-   │   └─ projectB.js
-   └─ ui/
-       ├─ boardView.js
-       └─ main.js
-
--->======================== index.html ======================== <!doctype html>
-
+<!doctype html>
 <html lang="ja">
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>Probabilistic‑Timespace‑Chess</title>
+  <title>Probabilistic-Timespace-Chess</title>
   <link rel="stylesheet" href="./styles.css" />
-  <!-- チェス規則エンジン（UMD）。window.Chess として提供されます -->
+  <!-- チェス規則ライブラリ（グローバルに window.Chess を提供） -->
   <script src="https://cdn.jsdelivr.net/npm/chess.js@1.0.0/dist/chess.min.js"></script>
 </head>
 <body>
   <div class="container">
     <header class="header">
-      <h1>Probabilistic‑Timespace‑Chess</h1>
+      <h1>Probabilistic-Timespace-Chess</h1>
       <div class="controls">
         <input id="san" placeholder="例: e4, Nf3, Bb5+" />
         <button id="playSan">指す</button>
         <button id="reset">リセット</button>
         <label class="seed">Seed: <input id="seed" type="number" value="123456789" /></label>
       </div>
-    </header><main class="boards">
-  <section class="card">
-    <div class="card-title">Board A（実体）</div>
-    <div id="boardA" class="board" aria-label="Actual board"></div>
-  </section>
-  <section class="card">
-    <div class="card-title">Board B（確率投影）</div>
-    <div id="boardB" class="board" aria-label="Projected board"></div>
-  </section>
-</main>
+    </header>
 
-<footer class="footer">
-  <span>A面＝唯一の真実／B面＝毎手後に projectB(trueFen, seed, ply) で再計算</span>
-</footer>
+    <main class="boards">
+      <section class="card">
+        <div class="card-title">Board A（実体）</div>
+        <div id="boardA" class="board" aria-label="Actual board"></div>
+      </section>
+      <section class="card">
+        <div class="card-title">Board B（確率投影）</div>
+        <div id="boardB" class="board" aria-label="Projected board"></div>
+      </section>
+    </main>
 
-  </div>  <script type="module" src="./src/ui/main.js"></script></body>
-</html>======================== styles.css ======================== :root{ --bg:#0b0d10; --card:#131720; --text:#e7edf5; --muted:#9fb2c9; --accent:#6aa3ff; } *{box-sizing:border-box} html,body{height:100%} body{margin:0; background:var(--bg); color:var(--text); font-family:system-ui,-apple-system,Segoe UI,Roboto,"Noto Sans JP",sans-serif} .container{max-width:1200px; margin:20px auto; padding:0 16px} .header{display:flex; flex-wrap:wrap; align-items:center; justify-content:space-between; gap:12px} .controls{display:flex; flex-wrap:wrap; gap:8px; align-items:center} .controls input{background:#0f141c; color:var(--text); border:1px solid #283248; border-radius:10px; padding:10px 12px} .controls button{background:var(--accent); color:#08111f; border:none; border-radius:10px; padding:10px 14px; font-weight:700; cursor:pointer} .controls .seed input{width:160px}
+    <footer class="footer">
+      <span>A面=真実／B面=毎手後に projectB(trueFEN, seed, ply) で再計算</span>
+    </footer>
+  </div>
 
-.boards{display:grid; grid-template-columns:1fr 1fr; gap:16px; margin-top:16px} @media (max-width: 820px){ .boards{ grid-template-columns:1fr } } .card{background:var(--card); border:1px solid #1f2633; border-radius:16px; padding:16px} .card-title{font-weight:700; margin-bottom:8px}
-
-/* 盤とマス */ .board{display:grid; grid-template-columns:repeat(8, 1fr); gap:2px; width:100%} .square{ aspect-ratio:1/1; display:flex; align-items:center; justify-content:center; font-size: clamp(18px, 4.2vw, 28px); border-radius:6px; user-select:none } .square.dark{ background:#4c566a } .square.light{ background:#d8dee9; color:#2e3440 } .square.highlight-from{ outline:3px solid #ffd166; box-shadow: inset 0 0 0 2px #ffd166 } .square.highlight-to{ outline:3px solid #06d6a0; box-shadow: inset 0 0 0 2px #06d6a0 }
-
-.footer{margin-top:10px; color:var(--muted); font-size:12px}
-
-======================== src/core/rng.js ======================== export function mulberry32(a){ return function(){ let t = (a += 0x6D2B79F5); t = Math.imul(t ^ (t >>> 15), t | 1); t ^= t + Math.imul(t ^ (t >>> 7), t | 61); return ((t ^ (t >>> 14)) >>> 0) / 4294967296; }; }
-
-======================== src/core/chessEngine.js ======================== // 棋譜状態の唯一のソース。window.Chess を利用（index.html で読み込み済み） export class Engine { constructor(fen = null){ this.game = new window.Chess(); if (fen && fen !== 'startpos') this.game.load(fen); this.lastMove = null; // {from,to} } fen(){ return this.game.fen(); } ply(){ return this.game.history().length; } reset(){ this.game = new window.Chess(); this.lastMove = null; } moveSAN(san){ const mv = this.game.move(san, { sloppy:true }); if (!mv) return false; this.lastMove = { from: mv.from, to: mv.to }; return true; } moveSquares(from, to){ const mv = this.game.move({ from, to, promotion:'q' }); if (!mv) return false; this.lastMove = { from: mv.from, to: mv.to }; return true; } }
-
-======================== src/core/projectB.js ======================== // A面の FEN を受け取り、B面用（確率投影）に変換 import { mulberry32 } from './rng.js';
-
-export function projectB(trueFen, seed, ply){ if (!trueFen || trueFen === 'startpos'){ trueFen = new window.Chess().fen(); } const rng = mulberry32(seed + ply); const parts = trueFen.split(' '); const board = parts[0]; const rows = board.split('/'); const projectedRows = rows.map(row => { let out = ''; for (const ch of row){ if (/[1-8]/.test(ch)) { out += ch; continue; } // デモ: 20% で不確定 "?" に置換（ここをあなたの仕様に差し替え） out += (rng() < 0.20) ? '?' : ch; } return out; }); parts[0] = projectedRows.join('/'); return parts.join(' '); }
-
-======================== src/ui/boardView.js ======================== // 盤の描画と入力処理（クリックで from→to を選択） const PIECES = { p:'♟', r:'♜', n:'♞', b:'♝', q:'♛', k:'♚', P:'♙', R:'♖', N:'♘', B:'♗', Q:'♕', K:'♔' };
-
-export function renderBoard(container, fen, opts={}){ const { highlights=null, onSquareClick=null } = opts; container.innerHTML = ''; const rows = fen.split(' ')[0].split('/'); rows.forEach((row, rIdx) => { let expanded = ''; for (const ch of row){ expanded += /[1-8]/.test(ch) ? ' '.repeat(parseInt(ch)) : ch; } for (let c=0;c<8;c++){ const div = document.createElement('div'); div.className = 'square ' + ((rIdx+c)%2 ? 'dark':'light'); const file = 'abcdefgh'[c]; const rank = 8 - rIdx; const name = file + rank; // 例: e4 if (highlights){ if (highlights.from === name) div.classList.add('highlight-from'); if (highlights.to === name) div.classList.add('highlight-to'); } const ch = expanded[c]; div.textContent = PIECES[ch] || (ch==='?'?'?':''); if (onSquareClick){ div.style.cursor = 'pointer'; div.addEventListener('click', () => onSquareClick(name)); div.addEventListener('touchend', () => onSquareClick(name), {passive:true}); } container.appendChild(div); } }); }
-
-======================== src/ui/main.js ======================== import { Engine } from '../core/chessEngine.js'; import { projectB } from '../core/projectB.js'; import { renderBoard } from './boardView.js';
-
-const elA = document.getElementById('boardA'); const elB = document.getElementById('boardB'); const elSAN = document.getElementById('san'); const elPlay = document.getElementById('playSan'); const elReset = document.getElementById('reset'); const elSeed = document.getElementById('seed');
-
-const engine = new Engine(); let seed = Number(elSeed.value) || 123456789; let pendingFrom = null; // クリック移動用：選択中のマス
-
-function renderAll(){ const fenA = engine.fen(); const fenB = projectB(fenA, seed, engine.ply()); renderBoard(elA, fenA, { highlights: engine.lastMove, onSquareClick: handleSquareClick }); renderBoard(elB, fenB, { highlights: engine.lastMove }); }
-
-function handleSquareClick(name){ if (!pendingFrom){ pendingFrom = name; renderBoard(elA, engine.fen(), { highlights: { from: name } , onSquareClick: handleSquareClick }); return; } const from = pendingFrom; const to = name; if (engine.moveSquares(from, to)){ pendingFrom = null; renderAll(); } else { // 無効なら選択し直し pendingFrom = null; renderAll(); } }
-
-// SAN 入力 elPlay.addEventListener('click', () => { const san = elSAN.value.trim(); if (!san) return; if (engine.moveSAN(san)){ elSAN.value = ''; renderAll(); } else { alert('不正な手: ' + san); } });
-
-// リセット elReset.addEventListener('click', () => { engine.reset(); pendingFrom = null; renderAll(); });
-
-// Seed 変更 elSeed.addEventListener('change', () => { seed = Number(elSeed.value) || 0; renderAll(); });
-
-// 初期描画 renderAll();
-
+  <!-- ESMエントリポイント -->
+  <script type="module" src="./src/ui/main.js"></script>
+</body>
+</html>
