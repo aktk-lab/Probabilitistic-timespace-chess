@@ -4,132 +4,223 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>Probabilistic‑Timespace‑Chess</title>
+  <title>Probabilistic‑Timespace‑Chess（AIつき・完全オフライン可）</title>
   <style>
-    body { margin:0; background:#0b0d10; color:#e7edf5; font-family:system-ui, sans-serif; }
-    .container{ max-width:1000px; margin:20px auto; padding:0 16px; }
-    h1{ margin-bottom:10px; }
-    .controls{ display:flex; gap:8px; flex-wrap:wrap; margin-bottom:16px; }
-    input, button{ padding:8px 12px; border-radius:8px; border:1px solid #333; }
-    button{ background:#6aa3ff; color:#08111f; font-weight:bold; cursor:pointer; }
-    .boards{ display:grid; grid-template-columns:1fr 1fr; gap:16px; }
-    @media(max-width:700px){ .boards{ grid-template-columns:1fr; } }
-    .card{ background:#131720; border-radius:12px; padding:12px; }
-    .title{ font-weight:bold; margin-bottom:8px; }.board{ display:grid; grid-template-columns:repeat(8,1fr); gap:2px; }
-.square{ aspect-ratio:1/1; display:flex; align-items:center; justify-content:center; font-size:28px; border-radius:4px; }
-.square.clickable{ cursor:pointer; }
-.light{ background:#d8dee9; color:#2e3440; }
-.dark{ background:#4c566a; }
-.highlight-from{ outline:3px solid #ffd166; }
-.highlight-to{ outline:3px solid #06d6a0; }
-
+    body{ margin:0; background:#0b0d10; color:#e7edf5; font-family:system-ui, -apple-system, Segoe UI, Roboto, "Noto Sans JP", sans-serif }
+    .container{ max-width:1000px; margin:20px auto; padding:0 16px }
+    h1{ margin:0 0 12px }
+    .controls{ display:flex; flex-wrap:wrap; gap:8px; align-items:center; margin-bottom:14px }
+    input,button{ padding:8px 12px; border-radius:8px; border:1px solid #283248 }
+    button{ background:#6aa3ff; color:#08111f; font-weight:700; cursor:pointer }
+    .boards{ display:grid; grid-template-columns:1fr 1fr; gap:16px }
+    @media(max-width:760px){ .boards{ grid-template-columns:1fr } }
+    .card{ background:#131720; border:1px solid #1f2633; border-radius:12px; padding:12px }
+    .title{ font-weight:700; margin-bottom:8px }
+    /* 盤 */
+    .board{ display:grid; grid-template-columns:repeat(8,1fr); gap:2px; }
+    .sq{ aspect-ratio:1/1; display:flex; align-items:center; justify-content:center; font-size:clamp(18px,4.2vw,28px); border-radius:6px; user-select:none }
+    .light{ background:#d8dee9; color:#2e3440 }
+    .dark{ background:#4c566a }
+    .sq.highlight-from{ outline:3px solid #ffd166; box-shadow: inset 0 0 0 2px #ffd166 }
+    .sq.highlight-to{ outline:3px solid #06d6a0; box-shadow: inset 0 0 0 2px #06d6a0 }
+    .clickable{ cursor:pointer }
+    .note{ color:#9fb2c9; font-size:12px; margin-top:6px }
   </style>
-  <script src="https://cdn.jsdelivr.net/npm/chess.js@1.0.0/dist/chess.min.js"></script>
 </head>
 <body>
   <div class="container">
     <h1>Probabilistic‑Timespace‑Chess</h1>
     <div class="controls">
-      <input id="moveSan" placeholder="例: e4, Nf3" />
-      <button id="btnMove">指す</button>
-      <button id="btnReset">リセット</button>
-      <label>Seed: <input id="seed" type="number" value="12345"></label>
-    </div>
-    <div class="boards">
-      <section class="card">
-        <div class="title">Board A（実体）</div>
-        <div id="boardA" class="board"></div>
-      </section>
-      <section class="card">
-        <div class="title">Board B（確率投影）</div>
-        <div id="boardB" class="board"></div>
-      </section>
-    </div>
-  </div>  <script>
-    const pieces = { p:'♟', r:'♜', n:'♞', b:'♝', q:'♛', k:'♚', P:'♙', R:'♖', N:'♘', B:'♗', Q:'♕', K:'♔' };
-    let game = new Chess();
-    let lastMove = null; let pendingFrom = null;
-    let seed = 12345;
+      <label>Seed: <input id="seed" type="number" value="12345" style="width:120px"></label>
+      <label><input id="aiToggle" type="checkbox" checked> 黒をAIにする</label>
+      <button id="reset">リセット</button>
+    </div><div class="boards">
+  <section class="card">
+    <div class="title">Board A（実体）</div>
+    <div id="boardA" class="board"></div>
+    <div class="note">A面は <strong>タップ/クリックで移動</strong>（白の手番 → 黒 → …）。</div>
+  </section>
+  <section class="card">
+    <div class="title">Board B（確率投影）</div>
+    <div id="boardB" class="board"></div>
+    <div class="note">毎手後に確率投影（?）で再計算。</div>
+  </section>
+</div>
 
-    function mulberry32(a){
-      return function(){
-        let t = a += 0x6D2B79F5;
-        t = Math.imul(t ^ t >>> 15, t | 1);
-        t ^= t + Math.imul(t ^ t >>> 7, t | 61);
-        return ((t ^ t >>> 14) >>> 0) / 4294967296;
+  </div>  <script>
+    // ===== 駒文字（Unicode）
+    const PIECES = { p:'\u265F', r:'\u265C', n:'\u265E', b:'\u265D', q:'\u265B', k:'\u265A',
+                     P:'\u2659', R:'\u2656', N:'\u2658', B:'\u2657', Q:'\u2655', K:'\u2654' };
+
+    const FILES = 'abcdefgh'.split('');
+    const START_FEN = 'rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1';
+
+    // ===== 乱数（決定論）
+    function mulberry32(a){ return function(){ let t=a+=0x6D2B79F5; t=Math.imul(t^(t>>>15),t|1); t^=t+Math.imul(t^(t>>>7),t|61); return ((t^(t>>>14))>>>0)/4294967296; } }
+
+    // ===== FEN <-> 配列
+    function fenToGrid(fen){
+      const rows = fen.split(' ')[0].split('/');
+      const grid = [];
+      for(let r=0;r<8;r++){
+        const row = [];
+        for(const ch of rows[r]){
+          if(/[1-8]/.test(ch)) row.push(...Array(parseInt(ch,10)).fill(''));
+          else row.push(ch);
+        }
+        grid.push(row);
+      }
+      return grid; // [rank8..1][file a..h]
+    }
+    function gridToFen(grid, turn='w'){
+      const rows = grid.map(row=>{
+        let out='', run=0; for(const ch of row){ if(!ch) run++; else { if(run){out+=run; run=0} out+=ch; } } if(run) out+=run; return out;
+      });
+      return rows.join('/') + ` ${turn} KQkq - 0 1`;
+    }
+
+    function colorOf(ch){ return ch ? (ch===ch.toUpperCase() ? 'w':'b') : null; }
+
+    // ===== 簡易エンジン（合法手生成・キャプチャ含む）
+    const Engine = {
+      grid: fenToGrid(START_FEN),
+      turn: 'w',
+      last: null,
+      reset(){ this.grid = fenToGrid(START_FEN); this.turn='w'; this.last=null; },
+      fen(){ return gridToFen(this.grid, this.turn); },
+      ply(){ return this._ply || 0; },
+      inside(r,c){ return r>=0 && r<8 && c>=0 && c<8; },
+      movesFrom(r,c){
+        const piece = this.grid[r][c]; if(!piece) return [];
+        const col = colorOf(piece); if(col!==this.turn) return [];
+        const sign = col==='w'? -1: +1; // 白は上へ(-1), 黒は下へ(+1)
+        const res = [];
+        const push = (nr,nc)=>{ if(!this.inside(nr,nc)) return false; const tgt=this.grid[nr][nc]; if(!tgt){ res.push([nr,nc]); return true; } if(colorOf(tgt)!==col){ res.push([nr,nc]); return false; } return false; };
+        const slide = (dr,dc)=>{ let nr=r+dr, nc=c+dc; while(this.inside(nr,nc)){ const cont = push(nr,nc); if(!cont) break; nr+=dr; nc+=dc; } };
+        switch(piece.toLowerCase()){
+          case 'p':{
+            // 前進
+            const nr=r+sign, nc=c;
+            if(this.inside(nr,nc) && !this.grid[nr][nc]){
+              res.push([nr,nc]);
+              // 初手2歩
+              const startRank = (col==='w')?6:1;
+              const nr2=r+2*sign; if(r===startRank && !this.grid[nr2][nc]) res.push([nr2,nc]);
+            }
+            // 斜め取り
+            for(const dc of [-1,1]){
+              const tr=r+sign, tc=c+dc; if(!this.inside(tr,tc)) continue;
+              const tgt=this.grid[tr][tc]; if(tgt && colorOf(tgt)!==col) res.push([tr,tc]);
+            }
+            break;
+          }
+          case 'n':{
+            const deltas=[[2,1],[1,2],[-1,2],[-2,1],[-2,-1],[-1,-2],[1,-2],[2,-1]];
+            for(const [dr,dc] of deltas){ push(r+dr,c+dc); }
+            break;
+          }
+          case 'b': slide(-1,-1), slide(-1,1), slide(1,-1), slide(1,1); break;
+          case 'r': slide(-1,0), slide(1,0), slide(0,-1), slide(0,1); break;
+          case 'q': slide(-1,0), slide(1,0), slide(0,-1), slide(0,1), slide(-1,-1), slide(-1,1), slide(1,-1), slide(1,1); break;
+          case 'k': for(const dr of [-1,0,1]) for(const dc of [-1,0,1]) if(dr||dc) push(r+dr,c+dc); break;
+        }
+        return res;
+      },
+      allMoves(col=this.turn){
+        const list=[]; for(let r=0;r<8;r++) for(let c=0;c<8;c++){ const p=this.grid[r][c]; if(p && colorOf(p)===col){ for(const [nr,nc] of this.movesFrom(r,c)) list.push([[r,c],[nr,nc]]); } }
+        return list;
+      },
+      moveSquares(from,to){
+        const c0 = [ FILES.indexOf(from[0]), 8-parseInt(from[1],10) ];
+        const c1 = [ FILES.indexOf(to[0]),   8-parseInt(to[1],10)   ];
+        const [r,c]=[c0[1],c0[0]], [nr,nc]=[c1[1],c1[0]];
+        const legal = this.movesFrom(r,c).some(([rr,cc])=> rr===nr && cc===nc);
+        if(!legal) return false;
+        const piece=this.grid[r][c];
+        // 移動＆昇格（単純化：最終段に到達したポーンは自動でクイーン）
+        this.grid[r][c]=''; this.grid[nr][nc]=piece;
+        if(piece==='P' && nr===0) this.grid[nr][nc]='Q';
+        if(piece==='p' && nr===7) this.grid[nr][nc]='q';
+        this.last={ from, to };
+        this.turn = (this.turn==='w'?'b':'w');
+        this._ply = (this._ply||0)+1;
+        return true;
+      }
+    };
+
+    // ===== B面の投影
+    let seed = 12345;
+    function projectFen(trueFen){
+      const rng = mulberry32(seed + (Engine.ply()||0));
+      const parts = trueFen.split(' ');
+      const rows = parts[0].split('/');
+      const projected = rows.map(row=>{
+        let out='';
+        for(const ch of row){ if(/[1-8]/.test(ch)){ out+=ch; } else { out += (rng()<0.20) ? '?' : ch; } }
+        return out;
+      }).join('/');
+      parts[0]=projected; return parts.join(' ');
+    }
+
+    // ===== レンダリング
+    const elA = document.getElementById('boardA');
+    const elB = document.getElementById('boardB');
+    let pendingFrom = null;
+
+    function drawBoard(container, fen, clickable){
+      container.innerHTML='';
+      const grid = fenToGrid(fen);
+      for(let r=0;r<8;r++){
+        for(let c=0;c<8;c++){
+          const d=document.createElement('div');
+          d.className='sq ' + ((r+c)%2?'dark':'light') + (clickable?' clickable':'');
+          const file=FILES[c]; const rank=8-r; const name=file+rank;
+          const last = Engine.last; if(last){ if(last.from===name) d.classList.add('highlight-from'); if(last.to===name) d.classList.add('highlight-to'); }
+          if(pendingFrom===name) d.classList.add('highlight-from');
+          const ch = grid[r][c]; d.textContent = PIECES[ch] || (ch==='?'?'?':'');
+          if(clickable){
+            d.addEventListener('click', ()=>{
+              if(!pendingFrom){
+                // 手番の駒のみ選択可能
+                if(colorOf(ch)!==Engine.turn) return;
+                pendingFrom=name; render(); return;
+              }
+              const ok = Engine.moveSquares(pendingFrom, name);
+              pendingFrom=null; render();
+              if(ok) maybeAIMove();
+            });
+          }
+          container.appendChild(d);
+        }
       }
     }
 
-    function renderBoard(container, fen, probabilistic=false, enableClicks=false){
-      container.innerHTML = '';
-      const rng = mulberry32(seed + game.history().length);
-      const rows = fen.split(' ')[0].split('/');
-      rows.forEach((row, r)=>{
-        let expanded = '';
-        for(const ch of row){ expanded += /[1-8]/.test(ch)? ' '.repeat(+ch) : ch; }
-        for(let c=0;c<8;c++){
-          const sq = document.createElement('div');
-          sq.className = 'square ' + ((r+c)%2?'dark':'light') + (enableClicks? ' clickable' : '');
-          const file = 'abcdefgh'[c];
-          const rank = 8 - r;
-          const name = file+rank;
-          // ハイライト（直前手 & 選択中）
-          if(lastMove){
-            if(lastMove.from===name) sq.classList.add('highlight-from');
-            if(lastMove.to===name) sq.classList.add('highlight-to');
-          }
-          if (enableClicks && pendingFrom===name){ sq.classList.add('highlight-from'); }
-          // 駒文字
-          let ch = expanded[c];
-          if(probabilistic && /[prnbqkPRNBQK]/.test(ch)){
-            if(rng()<0.2) ch = '?';
-          }
-          sq.textContent = pieces[ch] || (ch==='?'?'?':'');
-          // クリック移動（A面のみ）
-          if (enableClicks){
-            sq.addEventListener('click', ()=>{
-              if(!pendingFrom){
-                pendingFrom = name; render(); return;
-              }
-              const from = pendingFrom, to = name;
-              const mv = game.move({ from, to, promotion:'q' });
-              if(mv){ lastMove = {from:mv.from,to:mv.to}; }
-              pendingFrom = null; render();
-            });
-            sq.addEventListener('touchend', ()=>{
-              if(!pendingFrom){ pendingFrom = name; render(); return; }
-              const from = pendingFrom, to = name;
-              const mv = game.move({ from, to, promotion:'q' });
-              if(mv){ lastMove = {from:mv.from,to:mv.to}; }
-              pendingFrom = null; render();
-            }, {passive:true});
-          }
-          container.appendChild(sq);
-        }
-      });
-    }
-
     function render(){
-      const fen = game.fen();
-      renderBoard(document.getElementById('boardA'), fen, false, true);
-      renderBoard(document.getElementById('boardB'), fen, true);
+      const fenA = Engine.fen();
+      const fenB = projectFen(fenA);
+      drawBoard(elA, fenA, true);
+      drawBoard(elB, fenB, false);
     }
 
-    document.getElementById('btnMove').onclick = ()=>{
-      const san = document.getElementById('moveSan').value.trim();
-      if(!san) return;
-      const mv = game.move(san,{sloppy:true});
-      if(mv){ lastMove = {from:mv.from,to:mv.to}; render(); }
-      else alert('不正な手: '+san);
-      document.getElementById('moveSan').value='';
-    };
+    // ===== AI（黒番：合法手からランダム）
+    function maybeAIMove(){
+      const aiOn = document.getElementById('aiToggle').checked;
+      if(!aiOn) return;
+      if(Engine.turn!=='b') return;
+      const moves = Engine.allMoves('b');
+      if(moves.length===0) return;
+      const i = Math.floor(Math.random()*moves.length);
+      const [[[r,c],[nr,nc]]] = [moves[i]];
+      const from = FILES[c] + (8-r);
+      const to   = FILES[nc] + (8-nr);
+      setTimeout(()=>{ Engine.moveSquares(from,to); render(); }, 250);
+    }
 
-    document.getElementById('btnReset').onclick = ()=>{
-      game = new Chess(); lastMove=null; render();
-    };
+    // ===== UI
+    document.getElementById('reset').addEventListener('click', ()=>{ Engine.reset(); pendingFrom=null; render(); });
+    document.getElementById('seed').addEventListener('change', e=>{ seed = +e.target.value || 0; render(); });
 
-    document.getElementById('seed').onchange = (e)=>{ seed = +e.target.value; render(); };
-
+    // 初期表示
     render();
   </script></body>
 </html>
